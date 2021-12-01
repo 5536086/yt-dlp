@@ -1,6 +1,5 @@
 from __future__ import division, unicode_literals
 
-import copy
 import os
 import re
 import time
@@ -13,6 +12,7 @@ from ..utils import (
     format_bytes,
     shell_quote,
     timeconvert,
+    timetuple_from_msec,
 )
 from ..minicurses import (
     MultilineLogger,
@@ -76,14 +76,12 @@ class FileDownloader(object):
 
     @staticmethod
     def format_seconds(seconds):
-        (mins, secs) = divmod(seconds, 60)
-        (hours, mins) = divmod(mins, 60)
-        if hours > 99:
+        time = timetuple_from_msec(seconds * 1000)
+        if time.hours > 99:
             return '--:--:--'
-        if hours == 0:
-            return '%02d:%02d' % (mins, secs)
-        else:
-            return '%02d:%02d:%02d' % (hours, mins, secs)
+        if not time.hours:
+            return '%02d:%02d' % time[1:-1]
+        return '%02d:%02d:%02d' % time[:-1]
 
     @staticmethod
     def calc_percent(byte_counter, data_len):
@@ -95,6 +93,8 @@ class FileDownloader(object):
     def format_percent(percent):
         if percent is None:
             return '---.-%'
+        elif percent == 100:
+            return '100%'
         return '%6s' % ('%3.1f%%' % percent)
 
     @staticmethod
@@ -249,11 +249,29 @@ class FileDownloader(object):
             self._multiline = BreaklineStatusPrinter(self.ydl._screen_file, lines)
         else:
             self._multiline = MultilinePrinter(self.ydl._screen_file, lines, not self.params.get('quiet'))
+        self._multiline.allow_colors = self._multiline._HAVE_FULLCAP and not self.params.get('no_color')
 
     def _finish_multiline_status(self):
         self._multiline.end()
 
-    def _report_progress_status(self, s):
+    _progress_styles = {
+        'downloaded_bytes': 'light blue',
+        'percent': 'light blue',
+        'eta': 'yellow',
+        'speed': 'green',
+        'elapsed': 'bold white',
+        'total_bytes': '',
+        'total_bytes_estimate': '',
+    }
+
+    def _report_progress_status(self, s, default_template):
+        for name, style in self._progress_styles.items():
+            name = f'_{name}_str'
+            if name not in s:
+                continue
+            s[name] = self._format_progress(s[name], style)
+        s['_default_template'] = default_template % s
+
         progress_dict = s.copy()
         progress_dict.pop('info_dict')
         progress_dict = {'info': s['info_dict'], 'progress': progress_dict}
@@ -265,6 +283,10 @@ class FileDownloader(object):
         self.to_console_title(self.ydl.evaluate_outtmpl(
             progress_template.get('download-title') or 'yt-dlp %(progress._default_template)s',
             progress_dict))
+
+    def _format_progress(self, *args, **kwargs):
+        return self.ydl._format_text(
+            self._multiline.stream, self._multiline.allow_colors, *args, **kwargs)
 
     def report_progress(self, s):
         if s['status'] == 'finished':
@@ -278,8 +300,7 @@ class FileDownloader(object):
                 s['_elapsed_str'] = self.format_seconds(s['elapsed'])
                 msg_template += ' in %(_elapsed_str)s'
             s['_percent_str'] = self.format_percent(100)
-            s['_default_template'] = msg_template % s
-            self._report_progress_status(s)
+            self._report_progress_status(s, msg_template)
             return
 
         if s['status'] != 'downloading':
@@ -288,7 +309,7 @@ class FileDownloader(object):
         if s.get('eta') is not None:
             s['_eta_str'] = self.format_eta(s['eta'])
         else:
-            s['_eta_str'] = 'Unknown ETA'
+            s['_eta_str'] = 'Unknown'
 
         if s.get('total_bytes') and s.get('downloaded_bytes') is not None:
             s['_percent_str'] = self.format_percent(100 * s['downloaded_bytes'] / s['total_bytes'])
@@ -320,9 +341,12 @@ class FileDownloader(object):
                 else:
                     msg_template = '%(_downloaded_bytes_str)s at %(_speed_str)s'
             else:
-                msg_template = '%(_percent_str)s % at %(_speed_str)s ETA %(_eta_str)s'
-        s['_default_template'] = msg_template % s
-        self._report_progress_status(s)
+                msg_template = '%(_percent_str)s at %(_speed_str)s ETA %(_eta_str)s'
+        if s.get('fragment_index') and s.get('fragment_count'):
+            msg_template += ' (frag %(fragment_index)s/%(fragment_count)s)'
+        elif s.get('fragment_index'):
+            msg_template += ' (frag %(fragment_index)s)'
+        self._report_progress_status(s, msg_template)
 
     def report_resuming_byte(self, resume_len):
         """Report attempt to resume at given byte."""
@@ -405,13 +429,10 @@ class FileDownloader(object):
     def _hook_progress(self, status, info_dict):
         if not self._progress_hooks:
             return
-        info_dict = dict(info_dict)
-        for key in ('__original_infodict', '__postprocessors'):
-            info_dict.pop(key, None)
+        status['info_dict'] = info_dict
         # youtube-dl passes the same status object to all the hooks.
         # Some third party scripts seems to be relying on this.
         # So keep this behavior if possible
-        status['info_dict'] = copy.deepcopy(info_dict)
         for ph in self._progress_hooks:
             ph(status)
 
