@@ -1,6 +1,3 @@
-# coding: utf-8
-from __future__ import unicode_literals
-
 import re
 
 from .common import InfoExtractor
@@ -545,7 +542,7 @@ class PBSIE(InfoExtractor):
                 for vid_id in video_id]
             return self.playlist_result(entries, display_id)
 
-        info = None
+        info = {}
         redirects = []
         redirect_urls = set()
 
@@ -660,7 +657,9 @@ class PBSIE(InfoExtractor):
                     'protocol': 'http',
                 })
                 formats.append(f)
-        self._sort_formats(formats)
+        for f in formats:
+            if (f.get('format_note') or '').endswith(' AD'):  # Audio description
+                f['language_preference'] = -10
 
         rating_str = info.get('rating')
         if rating_str is not None:

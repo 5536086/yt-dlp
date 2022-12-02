@@ -1,14 +1,15 @@
 import random
+import urllib.parse
 
 from .common import InfoExtractor
 from ..utils import (
     ExtractorError,
-    int_or_none,
     float_or_none,
+    int_or_none,
+    traverse_obj,
     try_get,
     unescapeHTML,
     url_or_none,
-    traverse_obj
 )
 
 
@@ -19,6 +20,7 @@ class RedditIE(InfoExtractor):
         'info_dict': {
             'id': 'zv89llsvexdz',
             'ext': 'mp4',
+            'display_id': '6rrwyj',
             'title': 'That small heart attack.',
             'thumbnail': r're:^https?://.*\.(?:jpg|png)',
             'thumbnails': 'count:4',
@@ -33,6 +35,34 @@ class RedditIE(InfoExtractor):
         },
         'params': {
             'skip_download': True,
+        },
+    }, {
+        # 1080p fallback format
+        'url': 'https://www.reddit.com/r/aww/comments/90bu6w/heat_index_was_110_degrees_so_we_offered_him_a/',
+        'md5': '8b5902cfda3006bf90faea7adf765a49',
+        'info_dict': {
+            'id': 'gyh95hiqc0b11',
+            'ext': 'mp4',
+            'display_id': '90bu6w',
+            'title': 'Heat index was 110 degrees so we offered him a cold drink. He went for a full body soak instead',
+            'thumbnail': r're:^https?://.*\.(?:jpg|png)',
+            'thumbnails': 'count:7',
+            'timestamp': 1532051078,
+            'upload_date': '20180720',
+            'uploader': 'FootLoosePickleJuice',
+            'duration': 14,
+            'like_count': int,
+            'dislike_count': int,
+            'comment_count': int,
+            'age_limit': 0,
+        },
+    }, {
+        # videos embedded in reddit text post
+        'url': 'https://www.reddit.com/r/KamenRider/comments/wzqkxp/finale_kamen_rider_revice_episode_50_family_to/',
+        'playlist_count': 2,
+        'info_dict': {
+            'id': 'wzqkxp',
+            'title': 'md5:72d3d19402aa11eff5bd32fc96369b37',
         },
     }, {
         'url': 'https://www.reddit.com/r/videos/comments/6rrwyj',
@@ -80,10 +110,6 @@ class RedditIE(InfoExtractor):
         data = data[0]['data']['children'][0]['data']
         video_url = data['url']
 
-        # Avoid recursing into the same reddit URL
-        if 'reddit.com/' in video_url and '/%s/' % video_id in video_url:
-            raise ExtractorError('No media found', expected=True)
-
         over_18 = data.get('over_18')
         if over_18 is True:
             age_limit = 18
@@ -126,6 +152,32 @@ class RedditIE(InfoExtractor):
             'age_limit': age_limit,
         }
 
+        parsed_url = urllib.parse.urlparse(video_url)
+
+        # Check for embeds in text posts, or else raise to avoid recursing into the same reddit URL
+        if 'reddit.com' in parsed_url.netloc and f'/{video_id}/' in parsed_url.path:
+            entries = []
+            for media in traverse_obj(data, ('media_metadata', ...), expected_type=dict):
+                if not media.get('id') or media.get('e') != 'RedditVideo':
+                    continue
+                formats = []
+                if media.get('hlsUrl'):
+                    formats.extend(self._extract_m3u8_formats(
+                        unescapeHTML(media['hlsUrl']), video_id, 'mp4', m3u8_id='hls', fatal=False))
+                if media.get('dashUrl'):
+                    formats.extend(self._extract_mpd_formats(
+                        unescapeHTML(media['dashUrl']), video_id, mpd_id='dash', fatal=False))
+                if formats:
+                    entries.append({
+                        'id': media['id'],
+                        'display_id': video_id,
+                        'formats': formats,
+                        **info,
+                    })
+            if entries:
+                return self.playlist_result(entries, video_id, info.get('title'))
+            raise ExtractorError('No media found', expected=True)
+
         # Check if media is hosted on reddit:
         reddit_video = traverse_obj(data, (('media', 'secure_media'), 'reddit_video'), get_all=False)
         if reddit_video:
@@ -143,12 +195,21 @@ class RedditIE(InfoExtractor):
             dash_playlist_url = playlist_urls[0] or f'https://v.redd.it/{video_id}/DASHPlaylist.mpd'
             hls_playlist_url = playlist_urls[1] or f'https://v.redd.it/{video_id}/HLSPlaylist.m3u8'
 
-            formats = self._extract_m3u8_formats(
-                hls_playlist_url, display_id, 'mp4',
-                entry_protocol='m3u8_native', m3u8_id='hls', fatal=False)
+            formats = [{
+                'url': unescapeHTML(reddit_video['fallback_url']),
+                'height': int_or_none(reddit_video.get('height')),
+                'width': int_or_none(reddit_video.get('width')),
+                'tbr': int_or_none(reddit_video.get('bitrate_kbps')),
+                'acodec': 'none',
+                'vcodec': 'h264',
+                'ext': 'mp4',
+                'format_id': 'fallback',
+                'format_note': 'DASH video, mp4_dash',
+            }]
+            formats.extend(self._extract_m3u8_formats(
+                hls_playlist_url, display_id, 'mp4', m3u8_id='hls', fatal=False))
             formats.extend(self._extract_mpd_formats(
                 dash_playlist_url, display_id, mpd_id='dash', fatal=False))
-            self._sort_formats(formats)
 
             return {
                 **info,
@@ -156,6 +217,14 @@ class RedditIE(InfoExtractor):
                 'display_id': display_id,
                 'formats': formats,
                 'duration': int_or_none(reddit_video.get('duration')),
+            }
+
+        if parsed_url.netloc == 'v.redd.it':
+            self.raise_no_formats('This video is processing', expected=True, video_id=video_id)
+            return {
+                **info,
+                'id': parsed_url.path.split('/')[1],
+                'display_id': video_id,
             }
 
         # Not hosted on reddit, must continue extraction

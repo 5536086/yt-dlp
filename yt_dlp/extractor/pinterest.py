@@ -1,6 +1,3 @@
-# coding: utf-8
-from __future__ import unicode_literals
-
 import json
 
 from .common import InfoExtractor
@@ -55,7 +52,6 @@ class PinterestBaseIE(InfoExtractor):
                         'height': int_or_none(format_dict.get('height')),
                         'duration': duration,
                     })
-            self._sort_formats(formats)
 
         description = data.get('description') or data.get('description_html') or data.get('seo_description')
         timestamp = unified_timestamp(data.get('created_at'))

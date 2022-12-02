@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import re
 
 from .common import InfoExtractor
@@ -129,8 +127,6 @@ class SpankBangIE(InfoExtractor):
                 if format_url and isinstance(format_url, list):
                     format_url = format_url[0]
                 extract_format(format_id, format_url)
-
-        self._sort_formats(formats)
 
         info = self._search_json_ld(webpage, video_id, default={})
 

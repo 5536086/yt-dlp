@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import json
 import random
 
@@ -75,14 +73,7 @@ class LinuxAcademyIE(InfoExtractor):
     _CLIENT_ID = 'KaWxNn1C2Gc7n83W9OFeXltd8Utb5vvx'
     _NETRC_MACHINE = 'linuxacademy'
 
-    def _real_initialize(self):
-        self._login()
-
-    def _login(self):
-        username, password = self._get_login_info()
-        if username is None:
-            return
-
+    def _perform_login(self, username, password):
         def random_string():
             return ''.join([
                 random.choice('0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._~')
@@ -227,7 +218,6 @@ class LinuxAcademyIE(InfoExtractor):
         formats = self._extract_m3u8_formats(
             m3u8_url, item_id, 'mp4', entry_protocol='m3u8_native',
             m3u8_id='hls')
-        self._sort_formats(formats)
         info = {
             'id': item_id,
             'formats': formats,

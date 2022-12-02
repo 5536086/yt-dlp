@@ -1,6 +1,3 @@
-# coding: utf-8
-from __future__ import unicode_literals
-
 import itertools
 import json
 import math
@@ -297,8 +294,6 @@ class PolskieRadioPlayerIE(InfoExtractor):
                 formats.append({
                     'url': stream_url,
                 })
-
-        self._sort_formats(formats)
 
         return {
             'id': compat_str(channel['id']),
